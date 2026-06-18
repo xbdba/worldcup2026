@@ -1,0 +1,11 @@
+{
+  "name": "worldcup2026-ledger",
+  "version": "1.0.0",
+  "private": true,
+  "description": "2026 世界杯体彩购买方案前端页面",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "check": "node --check app.js && node --check api/worldcup/matches.js && node --check server.js"
+  }
+}

@@ -1,5 +1,10 @@
+const fs = require("fs");
+const path = require("path");
+const https = require("https");
+
 const API_BASE = "https://api.football-data.org/v4";
 const SPORTTERY_CALCULATOR_URL = "https://webapi.sporttery.cn/gateway/uniform/football/getMatchCalculatorV1.qry?channel=c";
+const CACHE_PATH = path.join(process.cwd(), "worldcup_matches_cache.json");
 const WORLD_CUP_ENDPOINTS = [
   "competitions/WC/matches?season=2026",
   "matches?competitions=WC&dateFrom=2026-06-01&dateTo=2026-07-31",
@@ -110,6 +115,34 @@ function toNumber(value) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function requestJson(url, headers = {}, timeoutMs = 8000) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { headers }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+      });
+      res.on("end", () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          reject(new Error(`HTTP ${res.statusCode}`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(body));
+        } catch (error) {
+          reject(new Error("接口返回内容不是 JSON"));
+        }
+      });
+    });
+
+    request.setTimeout(timeoutMs, () => {
+      request.destroy(new Error("请求超时"));
+    });
+    request.on("error", reject);
+  });
+}
+
 function pickOdds(source, options) {
   if (!source || typeof source !== "object") return [];
   return options
@@ -206,15 +239,11 @@ function normalizeSporttery(payload) {
 }
 
 async function fetchSporttery() {
-  const response = await fetch(SPORTTERY_CALCULATOR_URL, {
-    headers: {
+  return requestJson(SPORTTERY_CALCULATOR_URL, {
       Accept: "application/json, text/plain, */*",
       Referer: "https://www.sporttery.cn/",
       "User-Agent": "Mozilla/5.0 WorldCup2026Ledger/1.0",
-    },
   });
-  if (!response.ok) throw new Error(`sporttery HTTP ${response.status}`);
-  return response.json();
 }
 
 function kickoffParts(utcDate) {
@@ -292,15 +321,45 @@ function normalizeFootballData(rawMatches) {
     });
 }
 
+function readCacheMatches() {
+  try {
+    if (!fs.existsSync(CACHE_PATH)) return [];
+    const payload = JSON.parse(fs.readFileSync(CACHE_PATH, "utf8"));
+    return normalizeCachedMatches(payload.matches || []);
+  } catch (error) {
+    return [];
+  }
+}
+
+function normalizeCachedMatches(matches) {
+  return (Array.isArray(matches) ? matches : [])
+    .filter((match) => match && typeof match === "object")
+    .filter((match) => {
+      const leagueText = `${match.league || ""} ${match.leagueFull || ""} ${match.competitionCode || ""}`;
+      if (match.source === "sporttery") return /世界杯|World Cup|FIFA World Cup|\bWC\b/i.test(leagueText);
+      return match.competitionCode === "WC" || /世界杯|World Cup|FIFA World Cup|\bWC\b/i.test(leagueText);
+    })
+    .map((match) => ({
+      ...match,
+      league: "世界杯",
+      leagueFull: match.leagueFull || "FIFA World Cup",
+      competitionCode: "WC",
+      businessDate: match.businessDate || match.date || "",
+      home: localizeTeam(match.home),
+      away: localizeTeam(match.away),
+      homeFull: localizeTeam(match.homeFull || match.home),
+      awayFull: localizeTeam(match.awayFull || match.away),
+      markets: match.markets || {},
+      result: match.result || null,
+    }))
+    .sort((a, b) => `${a.date || a.businessDate || ""}${a.time || ""}${a.matchNum || ""}`.localeCompare(`${b.date || b.businessDate || ""}${b.time || ""}${b.matchNum || ""}`));
+}
+
 async function fetchFootballData(endpoint, apiKey) {
-  const response = await fetch(`${API_BASE}/${endpoint}`, {
-    headers: {
+  return requestJson(`${API_BASE}/${endpoint}`, {
       Accept: "application/json",
       "X-Auth-Token": apiKey,
-    },
   });
-  if (!response.ok) throw new Error(`Football-Data HTTP ${response.status}`);
-  return response.json();
 }
 
 function hasOdds(match) {
@@ -349,13 +408,29 @@ function mergeScheduleAndOdds(scheduleMatches, oddsMatches) {
 module.exports = async function handler(request, response) {
   const errors = [];
   let sportteryMatches = [];
+  const cachedMatches = readCacheMatches();
 
   try {
     const sportteryPayload = await fetchSporttery();
     sportteryMatches = normalizeSporttery(sportteryPayload);
-    errors.push("sporttery: 没有返回世界杯场次");
+    if (!sportteryMatches.length) errors.push("sporttery: 没有返回世界杯场次");
   } catch (error) {
     errors.push(`sporttery: ${error.message}`);
+  }
+
+  if (cachedMatches.length) {
+    response.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=1800");
+    response.status(200).json({
+      success: true,
+      source: sportteryMatches.length ? "cache+sporttery" : "cache",
+      endpoint: sportteryMatches.length ? "worldcup_matches_cache.json+sporttery:getMatchCalculatorV1" : "worldcup_matches_cache.json",
+      competition: "WC",
+      season: "2026",
+      generatedAt: new Date().toISOString(),
+      warning: sportteryMatches.length ? "" : errors.join("；"),
+      matches: mergeScheduleAndOdds(cachedMatches, sportteryMatches),
+    });
+    return;
   }
 
   const apiKey = process.env.FOOTBALL_DATA_API_KEY;

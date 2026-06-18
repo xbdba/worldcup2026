@@ -216,7 +216,7 @@ async function syncMatches() {
     cleanupPlan();
     state.lastSync = new Date().toLocaleString("zh-CN", { hour12: false });
     persist();
-    const oddsCount = state.matches.filter(hasMatchOdds).length;
+    const oddsCount = matches.filter(hasMatchOdds).length;
     showNotice(`已同步 ${state.matches.length} 场世界杯赛程；其中 ${oddsCount} 场已有体彩赔率。`, "ok");
     render();
   } catch (error) {
