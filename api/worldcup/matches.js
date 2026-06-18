@@ -405,6 +405,18 @@ function mergeScheduleAndOdds(scheduleMatches, oddsMatches) {
   return [...byKey.values()].sort((a, b) => `${a.date || a.businessDate || ""}${a.time || ""}${a.matchNum || ""}`.localeCompare(`${b.date || b.businessDate || ""}${b.time || ""}${b.matchNum || ""}`));
 }
 
+function createOddsSummary(matches, oddsMatches) {
+  const rows = Array.isArray(matches) ? matches : [];
+  const withOdds = rows.filter(hasOdds);
+  return {
+    totalMatches: rows.length,
+    sportteryReturnedMatches: Array.isArray(oddsMatches) ? oddsMatches.length : 0,
+    matchesWithOdds: withOdds.length,
+    matchesWithoutOdds: Math.max(0, rows.length - withOdds.length),
+    oddsMatchNums: withOdds.map((match) => match.matchNum).filter(Boolean),
+  };
+}
+
 module.exports = async function handler(request, response) {
   const errors = [];
   let sportteryMatches = [];
@@ -419,6 +431,7 @@ module.exports = async function handler(request, response) {
   }
 
   if (cachedMatches.length) {
+    const merged = mergeScheduleAndOdds(cachedMatches, sportteryMatches);
     response.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=1800");
     response.status(200).json({
       success: true,
@@ -428,7 +441,8 @@ module.exports = async function handler(request, response) {
       season: "2026",
       generatedAt: new Date().toISOString(),
       warning: sportteryMatches.length ? "" : errors.join("；"),
-      matches: mergeScheduleAndOdds(cachedMatches, sportteryMatches),
+      oddsSummary: createOddsSummary(merged, sportteryMatches),
+      matches: merged,
     });
     return;
   }
@@ -453,6 +467,7 @@ module.exports = async function handler(request, response) {
             competition: "WC",
             season: "2026",
             generatedAt: new Date().toISOString(),
+            oddsSummary: createOddsSummary(merged, sportteryMatches),
             matches: merged,
           });
           return;
@@ -474,6 +489,7 @@ module.exports = async function handler(request, response) {
       season: "2026",
       generatedAt: new Date().toISOString(),
       warning: "未配置全赛程接口，只返回当前已开放赔率的世界杯场次。",
+      oddsSummary: createOddsSummary(sportteryMatches, sportteryMatches),
       matches: sportteryMatches,
     });
     return;

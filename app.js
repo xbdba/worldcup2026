@@ -8,6 +8,7 @@ const state = {
   bets: [],
   plan: {},
   lastSync: "",
+  lastOddsSummary: null,
 };
 
 const els = {};
@@ -191,6 +192,7 @@ function loadState() {
     state.bets = Array.isArray(parsed.bets) ? parsed.bets.map(normalizeStoredBet) : [];
     state.plan = parsed.plan && typeof parsed.plan === "object" ? parsed.plan : {};
     state.lastSync = parsed.lastSync || "";
+    state.lastOddsSummary = parsed.lastOddsSummary && typeof parsed.lastOddsSummary === "object" ? parsed.lastOddsSummary : null;
   } catch (error) {
     showNotice("本地数据读取失败，已保留当前空台账。", "warn");
   }
@@ -204,6 +206,7 @@ function persist() {
       bets: state.bets,
       plan: state.plan,
       lastSync: state.lastSync,
+      lastOddsSummary: state.lastOddsSummary,
     })
   );
 }
@@ -211,13 +214,15 @@ function persist() {
 async function syncMatches() {
   showNotice("正在同步世界杯完整赛程，并合并已开放的体彩赔率...");
   try {
-    const matches = await fetchWorldCupMatches();
+    const payload = await fetchWorldCupPayload();
+    const matches = normalizeWorldCupPayload(payload).filter(isWorldCupMatch);
+    if (!matches.length) throw new Error("没有返回世界杯比赛");
+    state.lastOddsSummary = normalizeOddsSummary(payload, matches);
     replaceWorldCupSchedule(matches);
     cleanupPlan();
     state.lastSync = new Date().toLocaleString("zh-CN", { hour12: false });
     persist();
-    const oddsCount = matches.filter(hasMatchOdds).length;
-    showNotice(`已同步 ${state.matches.length} 场世界杯赛程；其中 ${oddsCount} 场已有体彩赔率。`, "ok");
+    showNotice(buildSyncNotice(state.lastOddsSummary, state.matches.length), "ok");
     render();
   } catch (error) {
     showNotice(`赛程同步失败：${error.message}。已保留本地已有数据。`, "warn");
@@ -243,13 +248,18 @@ async function syncResults() {
 }
 
 async function fetchWorldCupMatches() {
+  const data = await fetchWorldCupPayload();
+  const matches = normalizeWorldCupPayload(data).filter(isWorldCupMatch);
+  if (!matches.length) throw new Error("没有返回世界杯比赛");
+  return matches;
+}
+
+async function fetchWorldCupPayload() {
   const data = await fetchJson(API_WORLD_CUP_MATCHES);
   if (data && data.success === false && !Array.isArray(data.matches)) {
     throw new Error(data.error || "接口没有返回可用比赛");
   }
-  const matches = normalizeWorldCupPayload(data).filter(isWorldCupMatch);
-  if (!matches.length) throw new Error("没有返回世界杯比赛");
-  return matches;
+  return data;
 }
 
 async function fetchJson(url) {
@@ -552,7 +562,6 @@ function replaceWorldCupSchedule(matches) {
 
 function mergeMatch(existing, incoming) {
   const incomingHasOdds = hasMatchOdds(incoming);
-  const existingHasOdds = hasMatchOdds(existing);
   return {
     ...existing,
     ...incoming,
@@ -567,10 +576,10 @@ function mergeMatch(existing, incoming) {
     awayFull: incoming.awayFull || existing.awayFull,
     status: incoming.status || existing.status,
     stage: incoming.stage || existing.stage,
-    source: incomingHasOdds ? incoming.source : existing.source || incoming.source,
-    sourceLabel: incomingHasOdds ? incoming.sourceLabel : existing.sourceLabel || incoming.sourceLabel,
-    oddsUpdatedAt: incoming.oddsUpdatedAt || existing.oddsUpdatedAt,
-    markets: incomingHasOdds ? incoming.markets : existingHasOdds ? existing.markets : incoming.markets,
+    source: incoming.source || existing.source,
+    sourceLabel: incoming.sourceLabel || existing.sourceLabel,
+    oddsUpdatedAt: incomingHasOdds ? incoming.oddsUpdatedAt : "",
+    markets: incomingHasOdds ? incoming.markets : {},
     result: incoming.result || existing.result || null,
   };
 }
@@ -731,6 +740,7 @@ function renderMatchCard(match) {
   const activeMarket = availableMarkets[0] && availableMarkets[0][0];
   const noOdds = !availableMarkets.length;
   const selectedCount = countMatchSelections(match.id);
+  const oddsStatus = getOddsStatus(match);
 
   return `
     <article class="match-card${selectedCount ? " has-selection" : ""}">
@@ -749,18 +759,18 @@ function renderMatchCard(match) {
               ${match.oddsUpdatedAt ? ` · 赔率 ${escapeHtml(match.oddsUpdatedAt)}` : ""}
             </div>
           </div>
-          <div class="selected-badge">${selectedCount ? `${selectedCount} 项已选` : noOdds ? "赔率待更新" : "可选"}</div>
+          <div class="selected-badge">${escapeHtml(selectedCount ? `${selectedCount} 项已选` : noOdds ? oddsStatus.badge : "可选")}</div>
         </div>
-        ${noOdds ? renderNoOdds(match) : renderMarketTabs(match, availableMarkets, activeMarket)}
+        ${noOdds ? renderNoOdds(match, oddsStatus) : renderMarketTabs(match, availableMarkets, activeMarket)}
       </div>
     </article>
   `;
 }
 
-function renderNoOdds(match) {
+function renderNoOdds(match, oddsStatus = getOddsStatus(match)) {
   return `
-    <div class="no-odds-row">
-      <span>该场暂未开放体彩赔率，赛程已保留，赔率更新后会自动合并。</span>
+    <div class="no-odds-row ${escapeHtml(oddsStatus.tone)}">
+      <span>${escapeHtml(oddsStatus.message)}</span>
       <button class="secondary-pick" data-select="${escapeHtml(JSON.stringify(createManualSelectionPayload(match)))}" type="button">手动录入</button>
     </div>
   `;
@@ -1254,6 +1264,55 @@ function showNotice(message, type = "") {
   els.syncNotice.className = `notice ${type}`;
 }
 
+function normalizeOddsSummary(payload, matches) {
+  const summary = payload && payload.oddsSummary && typeof payload.oddsSummary === "object" ? payload.oddsSummary : {};
+  const oddsMatchNums = Array.isArray(summary.oddsMatchNums)
+    ? summary.oddsMatchNums.filter(Boolean)
+    : matches.filter(hasMatchOdds).map((match) => match.matchNum).filter(Boolean);
+  const matchesWithOdds = Number.isFinite(Number(summary.matchesWithOdds)) ? Number(summary.matchesWithOdds) : matches.filter(hasMatchOdds).length;
+  return {
+    totalMatches: Number.isFinite(Number(summary.totalMatches)) ? Number(summary.totalMatches) : matches.length,
+    sportteryReturnedMatches: Number.isFinite(Number(summary.sportteryReturnedMatches)) ? Number(summary.sportteryReturnedMatches) : matchesWithOdds,
+    matchesWithOdds,
+    matchesWithoutOdds: Number.isFinite(Number(summary.matchesWithoutOdds)) ? Number(summary.matchesWithoutOdds) : Math.max(0, matches.length - matchesWithOdds),
+    oddsMatchNums,
+    generatedAt: payload && payload.generatedAt ? payload.generatedAt : "",
+    source: payload && payload.source ? payload.source : "",
+  };
+}
+
+function buildSyncNotice(summary, totalMatches) {
+  const total = summary && summary.totalMatches ? summary.totalMatches : totalMatches;
+  const oddsCount = summary && Number.isFinite(summary.matchesWithOdds) ? summary.matchesWithOdds : 0;
+  const returned = summary && Number.isFinite(summary.sportteryReturnedMatches) ? summary.sportteryReturnedMatches : oddsCount;
+  return `已同步 ${total} 场世界杯赛程；体彩接口当前返回 ${returned} 场，其中 ${oddsCount} 场有可选赔率。未返回赔率的场次会保留赛程，可手动录入或等待接口更新。`;
+}
+
+function getOddsStatus(match) {
+  if (isPastKickoff(match)) {
+    return {
+      badge: "无接口赔率",
+      tone: "is-closed",
+      message: "体彩接口当前没有返回该场赔率，通常是已过销售窗口或未保留历史赔率；赛程和赛果仍保留。",
+    };
+  }
+
+  return {
+    badge: "赔率待更新",
+    tone: "is-pending",
+    message: "体彩接口当前未返回该场赔率；赛程已保留，后续接口开放后会自动合并。",
+  };
+}
+
+function isPastKickoff(match) {
+  const date = match.date || match.businessDate;
+  const time = match.time || "00:00";
+  if (!date) return false;
+  const kickoff = new Date(`${date}T${time}:00+08:00`);
+  if (Number.isNaN(kickoff.getTime())) return false;
+  return kickoff.getTime() <= Date.now();
+}
+
 function getEmptyState(title, text) {
   return `<div class="empty-state"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(text)}</span></div>`;
 }
@@ -1408,7 +1467,9 @@ function groupBy(rows, key) {
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
 }
 
 function createId() {

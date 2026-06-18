@@ -738,7 +738,6 @@ label {
 .no-odds-row {
   align-items: center;
   border-top: 1px solid var(--line);
-  color: var(--muted);
   display: flex;
   font-size: 13px;
   font-weight: 800;
@@ -747,6 +746,21 @@ label {
   line-height: 1.4;
   min-width: 0;
   padding: 10px;
+}
+
+.no-odds-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.no-odds-row.is-pending {
+  background: #fffaf0;
+  color: #665126;
+}
+
+.no-odds-row.is-closed {
+  background: #f7f3e7;
+  color: #615b4d;
 }
 
 .secondary-pick {

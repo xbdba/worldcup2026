@@ -26,7 +26,7 @@ http://127.0.0.1:8124/
 ## 数据来源
 
 - `worldcup_matches_cache.json`：完整世界杯赛程底表。
-- sporttery 官方计算器接口：用于合并已开放的体彩赔率。
+- sporttery 官方计算器接口：用于合并当前接口返回的体彩赔率；接口未返回的场次会保留赛程，赔率留空，不再沿用浏览器旧缓存。
 - `FOOTBALL_DATA_API_KEY`：可选，仅作为更新世界杯赛程的备用接口。
 
 ## 部署到 GitHub + Vercel
