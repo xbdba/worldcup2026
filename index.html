@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>世界杯 2026 投注收益台账</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <p class="eyebrow">World Cup 2026 Ledger</p>
+          <h1>投注收益台账</h1>
+          <p class="deck">只保留 2026 世界杯场次，按中国体彩方式选择胜平负、让球胜平负或比分，组合成最终购买方案。</p>
+        </div>
+        <div class="top-actions">
+          <button class="icon-button" id="syncMatchesBtn" title="同步世界杯赛程" type="button">
+            <span aria-hidden="true">↻</span>
+          </button>
+          <button class="icon-button" id="syncResultsBtn" title="同步赛果" type="button">
+            <span aria-hidden="true">✓</span>
+          </button>
+          <button class="icon-button" id="exportBtn" title="导出备份" type="button">
+            <span aria-hidden="true">⇩</span>
+          </button>
+          <label class="icon-button file-button" title="导入备份">
+            <span aria-hidden="true">⇧</span>
+            <input id="importFile" accept="application/json" type="file" />
+          </label>
+        </div>
+      </header>
+
+      <main>
+        <section class="summary-grid" aria-label="收益概览">
+          <article class="metric is-primary">
+            <span>累计净收益</span>
+            <strong id="netProfit">¥0.00</strong>
+            <small id="roiText">收益率 0.0%</small>
+          </article>
+          <article class="metric">
+            <span>累计投注</span>
+            <strong id="totalStake">¥0.00</strong>
+            <small id="ticketCount">0 笔投注</small>
+          </article>
+          <article class="metric">
+            <span>累计返还</span>
+            <strong id="totalReturn">¥0.00</strong>
+            <small id="hitRate">命中率 0.0%</small>
+          </article>
+          <article class="metric">
+            <span>今日盈亏</span>
+            <strong id="todayProfit">¥0.00</strong>
+            <small id="lastSync">尚未同步</small>
+          </article>
+        </section>
+
+        <section class="workbench">
+          <div class="panel panel-wide match-board-panel">
+            <div class="panel-head">
+              <div>
+              <p class="eyebrow">World Cup Board</p>
+              <h2>世界杯赛程与赔率</h2>
+              </div>
+              <div class="filters">
+                <input id="matchSearch" placeholder="搜索球队/编号/阶段" type="search" />
+                <select id="dateFilter" aria-label="比赛日期筛选"></select>
+              </div>
+            </div>
+            <div class="notice" id="syncNotice">
+              已加载世界杯完整赛程；体彩赔率开放后会自动合并到对应场次。点击选项加入右侧方案。
+            </div>
+            <div class="match-list" id="matchList"></div>
+          </div>
+
+          <aside class="panel bet-panel sticky-panel">
+            <div class="panel-head compact">
+              <div>
+                <p class="eyebrow">Ticket Builder</p>
+                <h2>我的购买方案</h2>
+              </div>
+            </div>
+            <div class="plan-builder">
+              <div class="plan-empty" id="planEmpty">
+                <strong>未选择场次</strong>
+                <span>每场可单独选择玩法和选项，多场会自动组成你的方案。</span>
+              </div>
+              <div class="plan-list" id="planList" hidden></div>
+              <div class="plan-controls">
+              <div class="two-col">
+                <label>
+                  投注日期
+                  <input id="planDate" required type="date" />
+                </label>
+                <label>
+                  金额
+                  <input id="planStake" min="0" placeholder="100" required step="2" type="number" />
+                </label>
+              </div>
+              <label>
+                过关方式
+                <select id="planPassType">
+                  <option value="单关">单关</option>
+                  <option value="2 串 1">2 串 1</option>
+                  <option value="3 串 1">3 串 1</option>
+                  <option value="4 串 1">4 串 1</option>
+                  <option value="5 串 1">5 串 1</option>
+                  <option value="6 串 1">6 串 1</option>
+                  <option value="混合过关">混合过关</option>
+                </select>
+              </label>
+              <div class="plan-summary" id="planSummary">未选择比赛</div>
+              <button class="primary-action" id="savePlanBtn" type="button">保存购买方案</button>
+              <button class="secondary-action full" id="clearPlanBtn" type="button">清空方案</button>
+              </div>
+            </div>
+          </aside>
+        </section>
+
+        <section class="panel ledger-panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Settlement</p>
+              <h2>投注记录与结算</h2>
+            </div>
+            <div class="filters">
+              <select id="statusFilter" aria-label="投注状态筛选">
+                <option value="all">全部状态</option>
+                <option value="pending">未结算</option>
+                <option value="won">已中奖</option>
+                <option value="lost">未中奖</option>
+                <option value="void">无效/退款</option>
+              </select>
+              <button class="secondary-action" id="clearSettledBtn" type="button">只看未结算</button>
+            </div>
+          </div>
+          <div class="ledger-table-wrap">
+            <table class="ledger-table">
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th>场次</th>
+                  <th>投注</th>
+                  <th>本金</th>
+                  <th>比分</th>
+                  <th>状态</th>
+                  <th>收益</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="ledgerBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+      </main>
+    </div>
+
+    <template id="emptyStateTemplate">
+      <div class="empty-state">
+        <strong>还没有数据</strong>
+        <span>先同步赛程，或手动录入一笔投注。</span>
+      </div>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
